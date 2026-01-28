@@ -1,0 +1,65 @@
+﻿@page "/login"
+@using CompanyResources.Shared
+@using CompanyResources.UI.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject HttpClient Http
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+
+<h3>Logowanie do Systemu</h3>
+
+<div class="card p-3" style="max-width: 400px;">
+    <div class="mb-3">
+        <label>Email (demo: admin@firma.pl)</label>
+        <input @bind="loginModel.Email" class="form-control" />
+    </div>
+    <div class="mb-3">
+        <label>Hasło (demo: admin123)</label>
+        <input type="password" @bind="loginModel.Password" class="form-control" />
+    </div>
+    <button class="btn btn-success" @onclick="HandleLogin">Zaloguj</button>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert alert-danger mt-2">@message</div>
+    }
+</div>
+
+@code {
+    private LoginDto loginModel = new();
+    private string message = "";
+
+    private string ApiUrl = "https://localhost:7153";
+
+    private async Task HandleLogin()
+    {
+        try
+        {
+            var result = await Http.PostAsJsonAsync($"{ApiUrl}/api/auth/login", loginModel);
+
+            if (result.IsSuccessStatusCode)
+            {
+                var response = await result.Content.ReadFromJsonAsync<AuthResponse>();
+
+                // Powiadamiamy system o zalogowaniu
+                if (AuthStateProvider is CustomAuthStateProvider authProvider)
+                {
+                    authProvider.NotifyUserLoggedIn(response.Token);
+                    Nav.NavigateTo("/");
+                }
+                else
+                {
+                    message = "Błąd: Nie znaleziono CustomAuthStateProvider.";
+                }
+            }
+            else
+            {
+                message = "Błąd logowania! Sprawdź login i hasło.";
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Nie można połączyć z API ({ApiUrl}). Błąd: {ex.Message}";
+        }
+    }
+}

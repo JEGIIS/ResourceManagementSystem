@@ -1,0 +1,225 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.SignalR.Client
+@using CompanyResources.Shared
+@inject HttpClient Http
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthStateProvider
+
+<PageTitle>System Zasobów</PageTitle>
+
+<AuthorizeView>
+    <Authorized>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Panel Zarządzania</h1>
+            <button class="btn btn-outline-danger btn-sm" @onclick="Logout">Wyloguj (@context.User.Identity?.Name)</button>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card p-3 shadow-sm sticky-top" style="top: 20px;">
+                    <h4 class="mb-3">@(isEditing ? "Edytuj Zasób" : "Nowy Zasób")</h4>
+
+                    <div class="mb-3">
+                        <label class="form-label">Nazwa</label>
+                        <input @bind="currentResource.Name" class="form-control" placeholder="np. Laptop Dell" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Typ</label>
+                        <input @bind="currentResource.Type" class="form-control" placeholder="np. Sprzęt" />
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="availCheck" @bind="currentResource.IsAvailable" />
+                        <label class="form-check-label" for="availCheck">Zasób dostępny?</label>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        @if (isEditing)
+                        {
+                            <button class="btn btn-warning" @onclick="SaveEdit">💾 Zapisz Zmiany</button>
+                            <button class="btn btn-secondary" @onclick="CancelEdit">Anuluj</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary" @onclick="AddResource">➕ Dodaj Zasób</button>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8">
+                <div class="card p-3 shadow-sm">
+                    <h4>Lista Zasobów (Live)</h4>
+                    @if (resources == null)
+                    {
+                        <p class="text-muted">Ładowanie danych...</p>
+                    }
+                    else if (resources.Count == 0)
+                    {
+                        <p class="text-muted">Brak zasobów w systemie.</p>
+                    }
+                    else
+                    {
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nazwa</th>
+                                    <th>Typ</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Akcje</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in resources)
+                                {
+                                    <tr>
+                                        <td>@item.Name</td>
+                                        <td>@item.Type</td>
+                                        <td>
+                                            @if (item.IsAvailable)
+                                            {
+                                                <span class="badge bg-success">Dostępny</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-danger">Zajęty</span>
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => EditMode(item)">
+                                                ✏️
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteResource(item.Id)">
+                                                🗑️
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div class="text-center mt-5">
+            <h1 class="display-4">Witaj w Systemie</h1>
+            <p class="lead">Zaloguj się, aby zarządzać zasobami firmy.</p>
+            <a href="login" class="btn btn-primary btn-lg mt-3">Przejdź do logowania</a>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    // --- ZMIENNE ---
+    private List<Resource>? resources;
+    private Resource currentResource = new Resource(); // Obiekt formularza
+    private bool isEditing = false; // Czy jesteśmy w trybie edycji?
+    private HubConnection? hubConnection;
+
+    // WPISZ SWÓJ PORT API HTTPS:
+    private string ApiUrl = "https://localhost:7153";
+
+    [CascadingParameter] private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    // --- INICJALIZACJA ---
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await authenticationStateTask;
+        if (authState.User.Identity is not null && authState.User.Identity.IsAuthenticated)
+        {
+            await LoadData();
+            await StartSignalR();
+        }
+    }
+
+    // --- SYNC DANYCH ---
+    private async Task StartSignalR()
+    {
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl($"{ApiUrl}/resourceHub")
+            .Build();
+
+        // Gdy API krzyknie "Aktualizacja!", my odświeżamy listę
+        hubConnection.On("ReceiveResourceUpdate", async () =>
+        {
+            await LoadData();
+            StateHasChanged();
+        });
+
+        await hubConnection.StartAsync();
+    }
+
+    private async Task LoadData()
+    {
+        try { resources = await Http.GetFromJsonAsync<List<Resource>>($"{ApiUrl}/api/resources"); }
+        catch { /* Ignoruj błędy sieci w UI */ }
+    }
+
+    // --- CRUD ---
+
+    // 1. CREATE
+    private async Task AddResource()
+    {
+        if (string.IsNullOrWhiteSpace(currentResource.Name)) return;
+
+        await Http.PostAsJsonAsync($"{ApiUrl}/api/resources", currentResource);
+        currentResource = new Resource(); // Reset formularza
+    }
+
+    // 2. PRZYGOTOWANIE DO UPDATE (Wrzucenie danych do formularza)
+    private void EditMode(Resource item)
+    {
+        // Kopiujemy dane, żeby nie edytować tabeli "na żywo" przed zapisem
+        currentResource = new Resource
+        {
+            Id = item.Id,
+            Name = item.Name,
+            Type = item.Type,
+            IsAvailable = item.IsAvailable
+        };
+        isEditing = true;
+    }
+
+    // 3. WYKONANIE UPDATE
+    private async Task SaveEdit()
+    {
+        await Http.PutAsJsonAsync($"{ApiUrl}/api/resources/{currentResource.Id}", currentResource);
+        CancelEdit(); // Wyjście z trybu edycji
+    }
+
+    // 4. DELETE
+    private async Task DeleteResource(int id)
+    {
+        bool confirmed = await Microsoft.JSInterop.JSRuntimeExtensions.InvokeAsync<bool>(
+            (Microsoft.JSInterop.IJSRuntime)ServiceProvider.GetService(typeof(Microsoft.JSInterop.IJSRuntime)),
+            "confirm", "Czy na pewno chcesz usunąć ten zasób?"
+        );
+
+        if (confirmed)
+        {
+            await Http.DeleteAsync($"{ApiUrl}/api/resources/{id}");
+        }
+    }
+
+    // Anulowanie edycji
+    private void CancelEdit()
+    {
+        currentResource = new Resource();
+        isEditing = false;
+    }
+
+    // Wylogowanie
+    [Inject] IServiceProvider ServiceProvider { get; set; } // Do JS Runtime
+    private void Logout()
+    {
+        if (AuthStateProvider is CompanyResources.UI.Services.CustomAuthStateProvider authProvider)
+        {
+            authProvider.NotifyUserLoggedOut();
+            Navigation.NavigateTo("/login");
+        }
+    }
+}
