@@ -2,8 +2,10 @@
   <Folder Name="/docs/">
     <File Path="01-backend-api.md" />
   </Folder>
-  <Project Path="CompanyResources.API/CompanyResources.API.csproj" />
-  <Project Path="CompanyResources.Shared/CompanyResources.Shared.csproj" />
-  <Project Path="CompanyResources.Tests/CompanyResources.Tests.csproj" />
-  <Project Path="CompanyResources.UI/CompanyResources.UI.csproj" />
+  <Folder Name="/src/">
+    <Project Path="CompanyResources.API/CompanyResources.API.csproj" />
+    <Project Path="CompanyResources.Shared/CompanyResources.Shared.csproj" />
+    <Project Path="CompanyResources.Tests/CompanyResources.Tests.csproj" />
+    <Project Path="CompanyResources.UI/CompanyResources.UI.csproj" />
+  </Folder>
 </Solution>
